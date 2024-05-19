@@ -330,18 +330,21 @@ static bool __willOverflow(unsigned char byte1, unsigned char byte2, bool carry)
 const BigInteger BigInteger::operator+(const BigInteger& another) const
 {
 	int tempSize = max(size, another.size) + 1;
-	BigInteger operand1 = BigInteger(*this).resize(tempSize);
-	BigInteger operand2 = BigInteger(another).resize(tempSize);
-	BigInteger result = BigInteger(0).resize(tempSize);
+	BigInteger result(*this);
+	result.resize(tempSize);
 
 	bool carry = false;
 	for (int i = 0; i < tempSize; i++)
 	{
-		result.bytes[i] = operand1.bytes[i] + operand2.bytes[i];
+		unsigned char filler = another.isNegative() ? 0xFF : 0x00;
+		unsigned char byteToAdd = i < another.size ? another.bytes[i] : filler;
+		bool overflowed = __willOverflow(result.bytes[i], byteToAdd, carry);
+		
+		result.bytes[i] += byteToAdd;
 		if (carry)
 			result.bytes[i]++;
 
-		carry = __willOverflow(operand1.bytes[i], operand2.bytes[i], carry);
+		carry = overflowed;
 	}
 
 	return result.strip();
