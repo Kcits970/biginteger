@@ -46,19 +46,20 @@ BigInteger::BigInteger(const string& value)
 		__raiseInvalidStringLiteralException();
 	
 	bool sign = (value[0] == '-');
+	int start = (value[0] == '-' or value[0] == '+') ? 1 : 0;
 	
-	bytes = nullptr;
-	(*this) = BigInteger(0);
+	bytes = new unsigned char[(value.length() - start) / 2 + 1]();
+	size = (value.length() - start) / 2 + 1;
 	
-	for (int i = (sign ? 1 : 0); i < value.length(); i++)
+	for (int i = start; i < value.length(); i++)
 	{
 		if (value[i] < '0' || value[i] > '9')
 			__raiseInvalidStringLiteralException();
 		
-		(*this) = (*this) + BigInteger(value[i] - '0');
+		fixedAdd(BigInteger(value[i] - '0'));
 		
 		if (i != value.length() - 1)
-			(*this) = (*this) * BigInteger(10);
+			fixedAdd((*this) * BigInteger(9));
 	}
 	
 	if (sign)
@@ -327,27 +328,29 @@ static bool __willOverflow(unsigned char byte1, unsigned char byte2, bool carry)
 	return static_cast<unsigned int>(byte1) + static_cast<unsigned int>(byte2) + (carry ? 1 : 0) > 0xFF;
 }
 
-const BigInteger BigInteger::operator+(const BigInteger& another) const
+BigInteger& BigInteger::fixedAdd(const BigInteger& another)
 {
-	int tempSize = max(size, another.size) + 1;
-	BigInteger result(*this);
-	result.resize(tempSize);
+	unsigned char filler = another.isNegative() ? 0xFF : 0x00;
 
 	bool carry = false;
-	for (int i = 0; i < tempSize; i++)
+	for (int i = 0; i < size; i++)
 	{
-		unsigned char filler = another.isNegative() ? 0xFF : 0x00;
 		unsigned char byteToAdd = i < another.size ? another.bytes[i] : filler;
-		bool overflowed = __willOverflow(result.bytes[i], byteToAdd, carry);
+		bool overflowed = __willOverflow(bytes[i], byteToAdd, carry);
 		
-		result.bytes[i] += byteToAdd;
+		bytes[i] += byteToAdd;
 		if (carry)
-			result.bytes[i]++;
+			bytes[i]++;
 
 		carry = overflowed;
 	}
 
-	return result.strip();
+	return *this;
+}
+
+const BigInteger BigInteger::operator+(const BigInteger& another) const
+{
+	return BigInteger(*this).resize(max(size, another.size) + 1).fixedAdd(another).strip();
 }
 
 const BigInteger BigInteger::operator-(const BigInteger& another) const
@@ -363,17 +366,21 @@ const BigInteger BigInteger::operator*(const BigInteger& another) const
 	BigInteger operand2(another.abs());
 	BigInteger result(0);
 
+	result.resize(operand1.size + operand2.size + 1);
+	operand1.resize(operand1.size + operand2.size + 1);
+
 	for (int i = 0; i < operand2.size; i++)
 	{
 		for (int bitIndex = 0; bitIndex < 8; bitIndex++)
 		{
-			if (!(operand2.bytes[i] & (0x01 << bitIndex)))
-				continue;
+			if (operand2.bytes[i] & (0x01 << bitIndex))
+				result.fixedAdd(operand1);
 			
-			result = result + BigInteger(operand1).resize(operand1.size + i + 1).bytewiseLShift(i).bitwiseLShift(bitIndex);
+			operand1.bitwiseLShift(1);
 		}
 	}
 
+	result.strip();
 	return resultSign ? -result : result;
 }
 
@@ -400,8 +407,7 @@ const BigInteger BigInteger::operator/(const BigInteger& another) const
 			
 			if (remainder >= operand2)
 			{
-				remainder = remainder - operand2;
-				remainder.resize(operand1.size);
+				remainder.fixedAdd(-operand2);
 				quotient.bytes[i] |= (0x01 << bitIndex);
 			}
 		}

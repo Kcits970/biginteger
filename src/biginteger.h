@@ -21,6 +21,8 @@ class BigInteger
 	BigInteger& bytewiseRShift(int);
 	BigInteger& bitwiseLShift(int);
 	BigInteger& bitwiseRShift(int);
+	
+	BigInteger& fixedAdd(const BigInteger&);
 
 public:
 	BigInteger(int);
