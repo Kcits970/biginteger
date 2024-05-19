@@ -1,8 +1,8 @@
-#include <ostream>
-#include <string.h>
-
 #ifndef __BIGINTEGER_H__
 #define __BIGINTEGER_H__
+
+#include <ostream>
+#include <string.h>
 
 class BigInteger
 {
