@@ -47,6 +47,7 @@ BigInteger::BigInteger(const string& value)
 	
 	bool sign = (value[0] == '-');
 	
+	bytes = nullptr;
 	(*this) = BigInteger(0);
 	
 	for (int i = (sign ? 1 : 0); i < value.length(); i++)
@@ -54,10 +55,10 @@ BigInteger::BigInteger(const string& value)
 		if (value[i] < '0' || value[i] > '9')
 			__raiseInvalidStringLiteralException();
 		
-		(*this) += BigInteger(value[i] - '0');
+		(*this) = (*this) + BigInteger(value[i] - '0');
 		
 		if (i != value.length() - 1)
-			(*this) *= BigInteger(10);
+			(*this) = (*this) * BigInteger(10);
 	}
 	
 	if (sign)
@@ -366,7 +367,7 @@ const BigInteger BigInteger::operator*(const BigInteger& another) const
 			if (!(operand2.bytes[i] & (0x01 << bitIndex)))
 				continue;
 			
-			result += BigInteger(operand1).resize(operand1.size + i + 1).bytewiseLShift(i).bitwiseLShift(bitIndex);
+			result = result + BigInteger(operand1).resize(operand1.size + i + 1).bytewiseLShift(i).bitwiseLShift(bitIndex);
 		}
 	}
 
@@ -384,24 +385,26 @@ const BigInteger BigInteger::operator/(const BigInteger& another) const
 	BigInteger operand1(abs());
 	BigInteger operand2(another.abs());
 
-	BigInteger quotient(0);
-	BigInteger remainder(operand1);
+	BigInteger quotient = BigInteger(0).resize(operand1.size);
+	BigInteger remainder = BigInteger(0).resize(operand1.size);
 
-	while (remainder >= operand2)
+	for (int i = operand1.size - 1; i >= 0; i--)
 	{
-		BigInteger divisor = BigInteger(operand2).resize(operand1.size + 1);
-		BigInteger quotientPart = BigInteger(1).resize(operand1.size + 1);
-
-		while(remainder >= divisor)
+		for (int bitIndex = 7; bitIndex >= 0; bitIndex--)
 		{
-			divisor.bitwiseLShift(1);
-			quotientPart.bitwiseLShift(1);
+			remainder.bitwiseLShift(1);
+			remainder.bytes[0] |= (operand1.bytes[i] & (0x01 << bitIndex)) ? 0x01 : 0x00;
+			
+			if (remainder >= operand2)
+			{
+				remainder = remainder - operand2;
+				remainder.resize(operand1.size);
+				quotient.bytes[i] |= (0x01 << bitIndex);
+			}
 		}
-
-		remainder -= divisor.bitwiseRShift(1);
-		quotient += quotientPart.bitwiseRShift(1);
 	}
 	
+	quotient.strip();
 	return resultSign ? -quotient : quotient;
 }
 
@@ -409,31 +412,6 @@ const BigInteger BigInteger::operator/(const BigInteger& another) const
 const BigInteger BigInteger::operator%(const BigInteger& another) const
 {
 	return (*this) - ((*this) / another * another);
-}
-
-void BigInteger::operator+=(const BigInteger& another)
-{
-	(*this) = (*this) + another;
-}
-
-void BigInteger::operator-=(const BigInteger& another)
-{
-	(*this) = (*this) - another;
-}
-
-void BigInteger::operator*=(const BigInteger& another)
-{
-	(*this) = (*this) * another;
-}
-
-void BigInteger::operator/=(const BigInteger& another)
-{
-	(*this) = (*this) / another;
-}
-
-void BigInteger::operator%=(const BigInteger& another)
-{
-	(*this) = (*this) % another;
 }
 
 int BigInteger::toInt() const
@@ -463,7 +441,7 @@ string BigInteger::toString() const
 	while (!(absolute == BigInteger(0)))
 	{
 		result.insert(0, 1, '0' + (absolute % BigInteger(10)).toInt());
-		absolute /= BigInteger(10);
+		absolute = absolute / BigInteger(10);
 	}
 
 	if (sign)

@@ -43,12 +43,6 @@ public:
 	const BigInteger operator*(const BigInteger&) const;
 	const BigInteger operator/(const BigInteger&) const;
 	const BigInteger operator%(const BigInteger&) const;
-
-	void operator+=(const BigInteger&);
-	void operator-=(const BigInteger&);
-	void operator*=(const BigInteger&);
-	void operator/=(const BigInteger&);
-	void operator%=(const BigInteger&);
 	
 	int toInt() const;
 	std::string toString() const;
