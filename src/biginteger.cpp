@@ -1,5 +1,6 @@
 #include <iostream>
-#include <string.h>
+#include <string>
+#include <stack>
 #include "biginteger.h"
 using namespace std;
 
@@ -443,18 +444,28 @@ string BigInteger::toString() const
 	if (*this == BigInteger(0))
 		return "0";
 	
-	string result;
-	bool sign = isNegative();
 	BigInteger absolute = abs();
-	
+	stack<char> characters;
+
 	while (!(absolute == BigInteger(0)))
 	{
-		result.insert(0, 1, '0' + (absolute % BigInteger(10)).toInt());
+		characters.push('0' + (absolute % BigInteger(10)).toInt());
 		absolute = absolute / BigInteger(10);
 	}
 
-	if (sign)
-		result.insert(0, 1, '-');
+	if (isNegative())
+		characters.push('-');
+
+	char result[characters.size() + 1];
+	int counter = 0;
+
+	while (!characters.empty())
+	{
+		result[counter++] = characters.top();
+		characters.pop();
+	}
+
+	result[counter] = 0;
 	
 	return result;
 }
