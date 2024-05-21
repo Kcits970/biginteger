@@ -4,19 +4,48 @@
 #include "biginteger.h"
 using namespace std;
 
-void __raiseNegativeArgumentException()
+static void __raiseNegativeArgumentException()
 {
-	throw invalid_argument("received negative argument");
+	throw invalid_argument("received non-positive argument");
 }
 
-void __raiseZeroDivisionException()
+static void __raiseZeroDivisionException()
 {
 	throw invalid_argument("division by zero");
 }
 
-void __raiseInvalidStringLiteralException()
+static void __raiseInvalidStringLiteralException()
 {
 	throw invalid_argument("string contains invalid characters");
+}
+
+#define DEF_BIGINT(NAME, VALUE) static BigInteger BIGINTEGER_##NAME(VALUE);
+
+DEF_BIGINT(ZERO, 0)
+DEF_BIGINT(ONE, 1)
+DEF_BIGINT(TWO, 2)
+DEF_BIGINT(THREE, 3)
+DEF_BIGINT(FOUR, 4)
+DEF_BIGINT(FIVE, 5)
+DEF_BIGINT(SIX, 6)
+DEF_BIGINT(SEVEN, 7)
+DEF_BIGINT(EIGHT, 8)
+DEF_BIGINT(NINE, 9)
+DEF_BIGINT(TEN, 10)
+
+#undef DEF_BIGINT
+
+static inline bool __testBit(unsigned char byte, int bitIndex)
+{
+	return byte & 0x01 << bitIndex;
+}
+
+static inline void __setBit(unsigned char& byte, bool set, int bitIndex)
+{
+	if (set)
+		byte |= 0x01 << bitIndex;
+	else
+		byte &= ~(0x01 << bitIndex);
 }
 
 BigInteger::BigInteger(int value)
@@ -32,6 +61,32 @@ BigInteger::BigInteger(int value)
 	strip();
 }
 
+BigInteger::BigInteger(int allocationSize, bool zeroInitialize)
+{
+	if (allocationSize <= 0)
+		__raiseNegativeArgumentException();
+
+	if (zeroInitialize)
+		bytes = new unsigned char[allocationSize]();
+	else
+		bytes = new unsigned char[allocationSize];
+
+	size = allocationSize;
+}
+
+BigInteger::BigInteger(const BigInteger& source, int allocationSize, bool signExtend)
+{
+	if (allocationSize <= 0)
+		__raiseNegativeArgumentException();
+	
+	bytes = new unsigned char[allocationSize];
+	size = allocationSize;
+	unsigned char filler = (source.isNegative() && signExtend) ? 0xFF : 0x00;
+	
+	for (int i = 0; i < allocationSize; i++)
+		bytes[i] = i < source.size ? source.bytes[i] : filler;
+}
+
 BigInteger::BigInteger(const BigInteger& source)
 {
 	bytes = new unsigned char[source.size];
@@ -40,6 +95,20 @@ BigInteger::BigInteger(const BigInteger& source)
 	for (int i = 0; i < source.size; i++)
 		bytes[i] = source.bytes[i];
 }
+
+static BigInteger *__singleDigitInstances[] =
+{
+	&BIGINTEGER_ZERO,
+	&BIGINTEGER_ONE,
+	&BIGINTEGER_TWO,
+	&BIGINTEGER_THREE,
+	&BIGINTEGER_FOUR,
+	&BIGINTEGER_FIVE,
+	&BIGINTEGER_SIX,
+	&BIGINTEGER_SEVEN,
+	&BIGINTEGER_EIGHT,
+	&BIGINTEGER_NINE,	
+};
 
 BigInteger::BigInteger(const string& value)
 {
@@ -57,14 +126,16 @@ BigInteger::BigInteger(const string& value)
 		if (value[i] < '0' || value[i] > '9')
 			__raiseInvalidStringLiteralException();
 		
-		fixedAdd(BigInteger(value[i] - '0'));
+		fixedAdd(*__singleDigitInstances[value[i] - '0']);
 		
 		if (i != value.length() - 1)
-			fixedAdd((*this) * BigInteger(9));
+			fixedUnsignedMultiply(BIGINTEGER_TEN);
 	}
 	
 	if (sign)
-		(*this) = -(*this);
+		bitwiseNegate();
+
+	strip();
 }
 
 BigInteger::~BigInteger()
@@ -169,12 +240,12 @@ BigInteger& BigInteger::truncate(int newSize)
 
 static bool __checkFF(unsigned char byteFF, unsigned char nextByte)
 {
-	return byteFF == 0xFF && nextByte & 0x80;
+	return byteFF == 0xFF && __testBit(nextByte, 7);
 }
 
 static bool __check00(unsigned char byte00, unsigned char nextByte)
 {
-	return byte00 == 0x00 && !(nextByte & 0x80);
+	return byte00 == 0x00 && !__testBit(nextByte, 7);
 }
 
 BigInteger& BigInteger::strip()
@@ -196,97 +267,48 @@ BigInteger& BigInteger::strip()
 	return truncate(size - stripSize);
 }
 
-BigInteger& BigInteger::bytewiseLShift(int amount)
+BigInteger& BigInteger::bitwiseLShift()
 {
-	if (amount < 0)
-		__raiseNegativeArgumentException();
-
-	if (amount == 0)
-		return *this;
-
-	if (amount >= size)
-		return zeroOut();
-
-	for (int i = 0; i < size - amount; i++)
-		bytes[size - 1 - i] = bytes[size - 1 - i - amount];
-
-	for (int i = 0; i < amount; i++)
-		bytes[i] = 0x00;
-
-	return *this;
-}
-
-BigInteger& BigInteger::bytewiseRShift(int amount)
-{
-	if (amount < 0)
-		__raiseNegativeArgumentException();
-
-	if (amount == 0)
-		return *this;
-
-	if (amount >= size)
-		return zeroOut();
-
-	for (int i = 0; i < size - amount; i++)
-		bytes[i] = bytes[i + amount];
-	
-	for (int i = 0; i < amount; i++)
-		bytes[size - 1 - i] = 0x00;
-
-	return *this;
-}
-
-BigInteger& BigInteger::bitwiseLShift(int amount)
-{
-	if (amount < 0)
-		__raiseNegativeArgumentException();
-
-	if (amount == 0)
-		return *this;
-
-	bytewiseLShift(amount / 8);
-	amount %= 8;
-
-	unsigned char bitsToCarry = 0x00;
+	bool shiftOver = false;
 	for (int i = 0; i < size; i++)
 	{
-		unsigned char lostBits = bytes[i] & (0xFF << 8 - amount);
-		bytes[i] <<= amount;
-		bytes[i] |= bitsToCarry;
+		bool lost = __testBit(bytes[i], 7);
+		bytes[i] <<= 1;
+		
+		if (shiftOver)
+			__setBit(bytes[i], true, 0);
 
-		bitsToCarry = lostBits >> 8 - amount;
+		shiftOver = lost;
 	}
 
 	return *this;
 }
 
-BigInteger& BigInteger::bitwiseRShift(int amount)
+BigInteger& BigInteger::arithmeticRShift()
 {
-	if (amount < 0)
-		__raiseNegativeArgumentException();
+	bool sign = isNegative();
 
-	if (amount == 0)
-		return *this;
-
-	bytewiseRShift(amount / 8);
-	amount %= 8;
-
-	unsigned char bitsToCarry = 0x00;
+	bool shiftOver = false;
 	for (int i = size - 1; i >= 0; i--)
 	{
-		unsigned char lostBits = bytes[i] & (0xFF >> 8 - amount);
-		bytes[i] >>= amount;
-		bytes[i] |= bitsToCarry;
+		bool lost = __testBit(bytes[i], 0);
+		bytes[i] >>= 1;
 
-		bitsToCarry = lostBits << 8 - amount;
+		if (shiftOver)
+			__setBit(bytes[i], true, 7);
+
+		shiftOver = lost;
 	}
+
+	if (sign)
+		__setBit(bytes[size - 1], true, 7);
 
 	return *this;
 }
 
 bool BigInteger::isNegative() const
 {
-	return bytes[size - 1] & 0x80;
+	return __testBit(bytes[size - 1], 7);
 }
 
 const BigInteger BigInteger::operator-() const
@@ -301,12 +323,52 @@ const BigInteger BigInteger::abs() const
 
 bool BigInteger::operator<(const BigInteger& another) const
 {
-	return (*this - another).isNegative();
+	if (isNegative() && !another.isNegative())
+		return true;
+
+	if (!isNegative() && another.isNegative())
+		return false;
+
+	int compareLength = max(size, another.size);
+	unsigned char filler = isNegative() ? 0xFF : 0x00;
+
+	for (int i = compareLength - 1; i >= 0; i--)
+	{
+		unsigned char byte1 = i < size ? bytes[i] : filler;
+		unsigned char byte2 = i < another.size ? another.bytes[i] : filler;
+
+		if (byte1 < byte2)
+			return true;
+		else if (byte1 > byte2)
+			return false;
+	}
+
+	return false;
 }
 
 bool BigInteger::operator>(const BigInteger& another) const
 {
-	return (another - *this).isNegative();
+	return another < (*this);
+}
+
+bool BigInteger::operator==(const BigInteger& another) const
+{
+	if (isNegative() != another.isNegative())
+		return false;
+
+	int compareLength = max(size, another.size);
+	unsigned char filler = isNegative() ? 0xFF : 0x00;
+
+	for (int i = 0; i < compareLength; i++)
+	{
+		unsigned char byte1 = i < size ? bytes[i] : filler;
+		unsigned char byte2 = i < another.size ? another.bytes[i] : filler;
+
+		if (byte1 != byte2)
+			return false;
+	}
+
+	return true;
 }
 
 bool BigInteger::operator<=(const BigInteger& another) const
@@ -317,11 +379,6 @@ bool BigInteger::operator<=(const BigInteger& another) const
 bool BigInteger::operator>=(const BigInteger& another) const
 {
 	return !(*this < another);
-}
-
-bool BigInteger::operator==(const BigInteger& another) const
-{
-	return (*this <= another) && (*this >= another);
 }
 
 static bool __willOverflow(unsigned char byte1, unsigned char byte2, bool carry)
@@ -359,76 +416,123 @@ const BigInteger BigInteger::operator-(const BigInteger& another) const
 	return *this + -another;
 }
 
-const BigInteger BigInteger::operator*(const BigInteger& another) const
+static void __bytecopy(const unsigned char *src, int length, unsigned char *dst)
 {
-	bool resultSign = isNegative() != another.isNegative();
+	for (int i = 0; i < length; i++)
+		dst[i] = src[i];
+}
 
-	BigInteger operand1(abs());
-	BigInteger operand2(another.abs());
-	BigInteger result(0);
+BigInteger& BigInteger::fixedUnsignedMultiply(const BigInteger& multiplier)
+{
+	BigInteger multiplicand(*this);
+	zeroOut();
 
-	result.resize(operand1.size + operand2.size + 1);
-	operand1.resize(operand1.size + operand2.size + 1);
-
-	for (int i = 0; i < operand2.size; i++)
+	for (int i = 0; i < multiplier.size; i++)
 	{
 		for (int bitIndex = 0; bitIndex < 8; bitIndex++)
 		{
-			if (operand2.bytes[i] & (0x01 << bitIndex))
-				result.fixedAdd(operand1);
-			
-			operand1.bitwiseLShift(1);
+			if (__testBit(multiplier.bytes[i], bitIndex))
+				fixedAdd(multiplicand);
+
+			multiplicand.bitwiseLShift();
 		}
 	}
 
-	result.strip();
-	return resultSign ? -result : result;
+	return *this;
 }
 
-
-const BigInteger BigInteger::operator/(const BigInteger& another) const
+//Booth's multiplication algorithm.
+const BigInteger BigInteger::operator*(const BigInteger& multiplier) const
 {
-	if (another == BigInteger(0))
+	BigInteger __a(size + 1 + multiplier.size + 1, true);
+	BigInteger __s(size + 1 + multiplier.size + 1, true);
+	BigInteger __p(size + 1 + multiplier.size + 1, true);
+
+	BigInteger multiplicand(size + 1, false);
+	__bytecopy(bytes, size, multiplicand.bytes);
+	multiplicand.bytes[size] = isNegative() ? 0xFF : 0x00;
+
+	__bytecopy(multiplicand.bytes, multiplicand.size, __a.bytes + multiplier.size + 1);
+	multiplicand.bitwiseNegate();
+	__bytecopy(multiplicand.bytes, multiplicand.size, __s.bytes + multiplier.size + 1);
+	__bytecopy(multiplier.bytes, multiplier.size, __p.bytes + 1);
+	
+	for (int i = 0; i < multiplier.size; i++)
+	{
+		for (int j = 0; j < 8; j++)
+		{
+			if (!__testBit(__p.bytes[1], 0) && __testBit(__p.bytes[0], 7))
+				__p.fixedAdd(__a);
+			else if (__testBit(__p.bytes[1], 0) && !__testBit(__p.bytes[0], 7))
+				__p.fixedAdd(__s);
+	
+			__p.arithmeticRShift();
+		}
+	}
+
+	BigInteger product(size + 1 + multiplier.size, false);
+	__bytecopy(__p.bytes + 1, __p.size - 1, product.bytes);
+	return product.strip();
+}
+
+//Generic binary long division algorithm.
+pair<BigInteger, BigInteger> BigInteger::absoluteDivisionPair(const BigInteger& dividend, const BigInteger& divisor)
+{
+	if (divisor == BIGINTEGER_ZERO)
 		__raiseZeroDivisionException();
 
-	bool resultSign = isNegative() != another.isNegative();
+	BigInteger absDividend(dividend, dividend.size + 1, true);
+	BigInteger absDivisor(divisor, divisor.size + 1, true);
+	BigInteger negativeDivisor(absDivisor);
 
-	BigInteger operand1(abs());
-	BigInteger operand2(another.abs());
+	if (absDividend.isNegative())
+		absDividend.bitwiseNegate();
+	
+	if (absDivisor.isNegative())
+		absDivisor.bitwiseNegate();
+	else
+		negativeDivisor.bitwiseNegate();
 
-	BigInteger quotient = BigInteger(0).resize(operand1.size);
-	BigInteger remainder = BigInteger(0).resize(operand1.size);
+	BigInteger quotient(absDividend.size, true);
+	BigInteger remainder(absDividend.size, true);
 
-	for (int i = operand1.size - 1; i >= 0; i--)
+	for (int i = absDividend.size - 1; i >= 0; i--)
 	{
 		for (int bitIndex = 7; bitIndex >= 0; bitIndex--)
 		{
-			remainder.bitwiseLShift(1);
-			remainder.bytes[0] |= (operand1.bytes[i] & (0x01 << bitIndex)) ? 0x01 : 0x00;
-			
-			if (remainder >= operand2)
+			remainder.bitwiseLShift();
+			__setBit(remainder.bytes[0], __testBit(absDividend.bytes[i], bitIndex), 0);
+
+			if (remainder >= absDivisor)
 			{
-				remainder.fixedAdd(-operand2);
+				remainder.fixedAdd(negativeDivisor);
 				quotient.bytes[i] |= (0x01 << bitIndex);
 			}
 		}
 	}
 	
-	quotient.strip();
-	return resultSign ? -quotient : quotient;
+	return pair(quotient.strip(), remainder.strip());
+}
+
+const BigInteger BigInteger::operator/(const BigInteger& another) const
+{	
+	pair<BigInteger, BigInteger> divisionPair = absoluteDivisionPair(*this, another);
+
+	return isNegative() != another.isNegative() ? -divisionPair.first : divisionPair.first;
 }
 
 
 const BigInteger BigInteger::operator%(const BigInteger& another) const
 {
-	return (*this) - ((*this) / another * another);
+	pair<BigInteger, BigInteger> divisionPair = absoluteDivisionPair(*this, another);
+
+	return isNegative() ? -divisionPair.second : divisionPair.second;
 }
 
 int BigInteger::toInt() const
 {
 	int value = 0;
 	unsigned char *bytePtr = reinterpret_cast<unsigned char*>(&value);
-	
 	
 	for (int i = 0; i < (sizeof(int) < size ? sizeof(int) : size); i++)
 		bytePtr[i] = bytes[i];
@@ -438,19 +542,19 @@ int BigInteger::toInt() const
 
 // this function becomes really time-consuming when the numbers get large.
 // performance optimization is needed.
-
 string BigInteger::toString() const
 {
-	if (*this == BigInteger(0))
+	if (*this == BIGINTEGER_ZERO)
 		return "0";
 	
 	BigInteger absolute = abs();
 	stack<char> characters;
 
-	while (!(absolute == BigInteger(0)))
+	while (!(absolute == BIGINTEGER_ZERO))
 	{
-		characters.push('0' + (absolute % BigInteger(10)).toInt());
-		absolute = absolute / BigInteger(10);
+		pair<BigInteger, BigInteger> divisionPair = absoluteDivisionPair(absolute, BIGINTEGER_TEN);
+		characters.push('0' + divisionPair.second.toInt());
+		absolute = divisionPair.first;
 	}
 
 	if (isNegative())

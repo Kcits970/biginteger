@@ -2,12 +2,16 @@
 #define __BIGINTEGER_H__
 
 #include <ostream>
-#include <string.h>
+#include <string>
 
 class BigInteger
 {
 	unsigned char *bytes;
 	int size;
+	
+	BigInteger();
+	BigInteger(int, bool);
+	BigInteger(const BigInteger&, int, bool);
 
 	BigInteger& bitwiseInvert();
 	BigInteger& bitwiseIncrement();
@@ -16,13 +20,13 @@ class BigInteger
 	BigInteger& truncate(int);
 	BigInteger& resize(int);
 	BigInteger& strip();
-
-	BigInteger& bytewiseLShift(int);
-	BigInteger& bytewiseRShift(int);
-	BigInteger& bitwiseLShift(int);
-	BigInteger& bitwiseRShift(int);
+	
+	BigInteger& bitwiseLShift();
+	BigInteger& arithmeticRShift();
 	
 	BigInteger& fixedAdd(const BigInteger&);
+	BigInteger& fixedUnsignedMultiply(const BigInteger&);
+	static std::pair<BigInteger, BigInteger> absoluteDivisionPair(const BigInteger&, const BigInteger&);
 
 public:
 	BigInteger(int);
